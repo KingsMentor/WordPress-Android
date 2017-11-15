@@ -1,6 +1,7 @@
 package org.wordpress.android.ui.accounts;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
@@ -42,6 +43,11 @@ public class LoginActivity extends AppCompatActivity implements ConnectionCallba
         Callback, LoginListener, GoogleLoginListener {
     private static final String KEY_SMARTLOCK_COMPLETED = "KEY_SMARTLOCK_COMPLETED";
 
+    private static final String ARG_EMAIL_ADDRESS = "ARG_EMAIL_ADDRESS";
+    private static final String ARG_PASSWORD = "ARG_PASSWORD";
+    private static final String ARG_SOCIAL_ID_TOKEN = "ARG_SOCIAL_ID_TOKEN";
+    private static final String ARG_SOCIAL_SERVICE = "ARG_SOCIAL_SERVICE";
+
     private static final String FORGOT_PASSWORD_URL_SUFFIX = "wp-login.php?action=lostpassword";
 
     private SmartLockHelper mSmartLockHelper;
@@ -71,11 +77,57 @@ public class LoginActivity extends AppCompatActivity implements ConnectionCallba
                 case WPCOM_REAUTHENTICATE:
                 case SHARE_INTENT:
                     checkSmartLockPasswordAndStartLogin();
+                case NOTIFICATION_EMAIL_WRONG_PASSWORD:
+                    Intent intent = getIntent();
+                    String email = intent.getStringExtra(ARG_EMAIL_ADDRESS);
+                    String password = intent.getStringExtra(ARG_PASSWORD);
+                    startWithEmailPassword(email, password);
+                    break;
+                case NOTIFICATION_LOGIN_2FA:
+                    intent = getIntent();
+                    email = intent.getStringExtra(ARG_EMAIL_ADDRESS);
+                    password = intent.getStringExtra(ARG_PASSWORD);
+                    startWith2Fa(email, password);
+                    break;
+                case NOTIFICATION_SOCIAL_LOGIN_2FA:
+                    intent = getIntent();
+                    email = intent.getStringExtra(ARG_EMAIL_ADDRESS);
+                    password = intent.getStringExtra(ARG_PASSWORD);
+                    String idToken = intent.getStringExtra(ARG_SOCIAL_ID_TOKEN);
+                    String service = intent.getStringExtra(ARG_SOCIAL_SERVICE);
+                    startWith2faSocialConnect(email, password, idToken, service);
                     break;
             }
         } else {
             mSmartLockCompleted = savedInstanceState.getBoolean(KEY_SMARTLOCK_COMPLETED);
         }
+    }
+
+    public static Intent getPendingIntentForEmailWrongPassword(Context packageContext, String email, String password) {
+        Intent intent = new Intent(packageContext, LoginActivity.class);
+        LoginMode.NOTIFICATION_EMAIL_WRONG_PASSWORD.putInto(intent);
+        intent.putExtra(ARG_EMAIL_ADDRESS, email);
+        intent.putExtra(ARG_PASSWORD, password);
+        return intent;
+    }
+
+    public static Intent getPendingIntentForFa(Context packageContext, String email, String password) {
+        Intent intent = new Intent(packageContext, LoginActivity.class);
+        LoginMode.NOTIFICATION_LOGIN_2FA.putInto(intent);
+        intent.putExtra(ARG_EMAIL_ADDRESS, email);
+        intent.putExtra(ARG_PASSWORD, password);
+        return intent;
+    }
+
+    public static Intent getPendingIntentForSocial2FaConnect(Context packageContext, String email, String password,
+            String idToken, String service) {
+        Intent intent = new Intent(packageContext, LoginActivity.class);
+        LoginMode.NOTIFICATION_SOCIAL_LOGIN_2FA.putInto(intent);
+        intent.putExtra(ARG_EMAIL_ADDRESS, email);
+        intent.putExtra(ARG_PASSWORD, password);
+        intent.putExtra(ARG_SOCIAL_ID_TOKEN, idToken);
+        intent.putExtra(ARG_SOCIAL_SERVICE, service);
+        return intent;
     }
 
     @Override
@@ -138,6 +190,9 @@ public class LoginActivity extends AppCompatActivity implements ConnectionCallba
     private void loggedInAndFinish(ArrayList<Integer> oldSitesIds) {
         switch (getLoginMode()) {
             case FULL:
+            case NOTIFICATION_EMAIL_WRONG_PASSWORD:
+            case NOTIFICATION_LOGIN_2FA:
+            case NOTIFICATION_SOCIAL_LOGIN_2FA:
                 ActivityLauncher.showMainActivityAndLoginEpilogue(this, oldSitesIds);
                 setResult(Activity.RESULT_OK);
                 finish();
@@ -219,6 +274,23 @@ public class LoginActivity extends AppCompatActivity implements ConnectionCallba
             // prologue fragment is shown so, slide in the email screen (and add to history)
             slideInFragment(new LoginEmailFragment(), true, LoginEmailFragment.TAG);
         }
+    }
+
+    private void startWithEmailPassword(String email, String password) {
+        LoginEmailPasswordFragment loginEmailPasswordFragment =
+                LoginEmailPasswordFragment.newInstance(email, password, null, null, false);
+        showFragment(loginEmailPasswordFragment, LoginEmailPasswordFragment.TAG);
+    }
+
+    private void startWith2Fa(String email, String password) {
+        Login2FaFragment login2FaFragment = Login2FaFragment.newInstance(email, password);
+        showFragment(login2FaFragment, Login2FaFragment.TAG);
+    }
+
+    private void startWith2faSocialConnect(String email, String password, String idToken, String service) {
+        AnalyticsTracker.track(AnalyticsTracker.Stat.LOGIN_SOCIAL_2FA_NEEDED);
+        Login2FaFragment login2FaFragment = Login2FaFragment.newInstanceSocialConnect(email, password, idToken, service);
+        showFragment(login2FaFragment, Login2FaFragment.TAG);
     }
 
     // LoginListener implementation methods

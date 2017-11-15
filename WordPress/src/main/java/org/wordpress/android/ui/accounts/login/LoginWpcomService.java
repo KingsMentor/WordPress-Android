@@ -22,6 +22,7 @@ import org.wordpress.android.fluxc.generated.SiteActionBuilder;
 import org.wordpress.android.fluxc.store.AccountStore;
 import org.wordpress.android.fluxc.store.AccountStore.OnAuthenticationChanged;
 import org.wordpress.android.fluxc.store.SiteStore;
+import org.wordpress.android.ui.accounts.LoginActivity;
 import org.wordpress.android.ui.accounts.login.LoginWpcomService.OnLoginStateUpdated;
 import org.wordpress.android.ui.main.WPMainActivity;
 import org.wordpress.android.ui.notifications.services.NotificationsUpdateService;
@@ -31,6 +32,7 @@ import org.wordpress.android.util.AppLog;
 import org.wordpress.android.util.AppLog.T;
 import org.wordpress.android.util.AutoForeground;
 import org.wordpress.android.util.SiteUtils;
+import org.wordpress.android.util.ToastUtils;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -53,6 +55,9 @@ public class LoginWpcomService extends AutoForeground<OnLoginStateUpdated> {
         FETCHING_SETTINGS,
         FETCHING_SITES,
         SUCCESS,
+        FAILURE_EMAIL_WRONG_PASSWORD,
+        FAILURE_2FA,
+        FAILURE_SOCIAL_2FA,
         FAILURE
     }
 
@@ -74,6 +79,8 @@ public class LoginWpcomService extends AutoForeground<OnLoginStateUpdated> {
 
     private LoginPhase mLoginPhase = LoginPhase.IDLE;
 
+    private String mEmail;
+    private String mPassword;
     private String mIdToken;
     private String mService;
     private boolean isSocialLogin;
@@ -108,12 +115,15 @@ public class LoginWpcomService extends AutoForeground<OnLoginStateUpdated> {
     public boolean isInProgress() {
         return mLoginPhase != LoginPhase.IDLE
                 && mLoginPhase != LoginPhase.SUCCESS
-                && mLoginPhase != LoginPhase.FAILURE;
+                && !isError();
     }
 
     @Override
     public boolean isError() {
-        return mLoginPhase == LoginPhase.FAILURE;
+        return mLoginPhase == LoginPhase.FAILURE
+                || mLoginPhase == LoginPhase.FAILURE_EMAIL_WRONG_PASSWORD
+                || mLoginPhase == LoginPhase.FAILURE_2FA
+                || mLoginPhase == LoginPhase.FAILURE_SOCIAL_2FA;
     }
 
     @Override
@@ -129,6 +139,13 @@ public class LoginWpcomService extends AutoForeground<OnLoginStateUpdated> {
                 return getProgressNotification(100, "Login in: " + mLoginPhase.name());
             case SUCCESS:
                 return getSuccessNotification("Logged in!");
+            case FAILURE_EMAIL_WRONG_PASSWORD:
+                return getFailureNotification("Wrong password :(");
+            case FAILURE_2FA:
+                return get2FaNotification("Need to input a 2FA code to continue.", mEmail, mPassword);
+            case FAILURE_SOCIAL_2FA:
+                return getSocial2FaConnectNotification("Need to input a 2FA code to continue.", mEmail, mPassword,
+                        mIdToken, mService);
             case FAILURE:
                 return getFailureNotification("Login failed :(");
         }
@@ -140,7 +157,7 @@ public class LoginWpcomService extends AutoForeground<OnLoginStateUpdated> {
         mLoginPhase = loginPhase;
         notifyState();
 
-        if (loginPhase == LoginPhase.FAILURE || loginPhase == LoginPhase.SUCCESS) {
+        if (isError() || loginPhase == LoginPhase.SUCCESS) {
             stopSelf();
         }
     }
@@ -213,6 +230,52 @@ public class LoginWpcomService extends AutoForeground<OnLoginStateUpdated> {
                 .build();
     }
 
+    private Notification getEmailWrongPasswordNotification(String content, String email, String password) {
+        return new NotificationCompat.Builder(this)
+                .setContentTitle(content)
+                .setSmallIcon(R.drawable.ic_my_sites_24dp)
+                .setColor(getResources().getColor(R.color.blue_wordpress))
+                .setLargeIcon(BitmapFactory.decodeResource(getApplicationContext().getResources(),
+                        R.mipmap.app_icon))
+                .setAutoCancel(true)
+                .setContentIntent(PendingIntent.getActivity(LoginWpcomService.this,
+                        AutoForeground.NOTIFICATION_ID_FAILURE,
+                        LoginActivity.getPendingIntentForEmailWrongPassword(this, email, password),
+                        PendingIntent.FLAG_ONE_SHOT))
+                .build();
+    }
+
+    private Notification get2FaNotification(String content, String email, String password) {
+        return new NotificationCompat.Builder(this)
+                .setContentTitle(content)
+                .setSmallIcon(R.drawable.ic_my_sites_24dp)
+                .setColor(getResources().getColor(R.color.blue_wordpress))
+                .setLargeIcon(BitmapFactory.decodeResource(getApplicationContext().getResources(),
+                        R.mipmap.app_icon))
+                .setAutoCancel(true)
+                .setContentIntent(PendingIntent.getActivity(LoginWpcomService.this,
+                        AutoForeground.NOTIFICATION_ID_FAILURE,
+                        LoginActivity.getPendingIntentForFa(this, email, password),
+                        PendingIntent.FLAG_ONE_SHOT))
+                .build();
+    }
+
+    private Notification getSocial2FaConnectNotification(String content, String email, String password, String idToken,
+            String service) {
+        return new NotificationCompat.Builder(this)
+                .setContentTitle(content)
+                .setSmallIcon(R.drawable.ic_my_sites_24dp)
+                .setColor(getResources().getColor(R.color.blue_wordpress))
+                .setLargeIcon(BitmapFactory.decodeResource(getApplicationContext().getResources(),
+                        R.mipmap.app_icon))
+                .setAutoCancel(true)
+                .setContentIntent(PendingIntent.getActivity(LoginWpcomService.this,
+                        AutoForeground.NOTIFICATION_ID_FAILURE,
+                        LoginActivity.getPendingIntentForSocial2FaConnect(this, email, password, idToken, service),
+                        PendingIntent.FLAG_ONE_SHOT))
+                .build();
+    }
+
     @Override
     public int onStartCommand(@Nullable Intent intent, int flags, int startId) {
         if (intent == null) {
@@ -221,8 +284,8 @@ public class LoginWpcomService extends AutoForeground<OnLoginStateUpdated> {
 
         setState(LoginPhase.AUTHENTICATING);
 
-        final String email = intent.getStringExtra(ARG_EMAIL);
-        final String password = intent.getStringExtra(ARG_PASSWORD);
+        mEmail = intent.getStringExtra(ARG_EMAIL);
+        mPassword = intent.getStringExtra(ARG_PASSWORD);
 
         mIdToken = intent.getStringExtra(ARG_SOCIAL_ID_TOKEN);
         mService = intent.getStringExtra(ARG_SOCIAL_SERVICE);
@@ -230,50 +293,50 @@ public class LoginWpcomService extends AutoForeground<OnLoginStateUpdated> {
 
         mOldSitesIDs = SiteUtils.getCurrentSiteIds(mSiteStore, false);
 
-        AccountStore.AuthenticatePayload payload = new AccountStore.AuthenticatePayload(email, password);
+        AccountStore.AuthenticatePayload payload = new AccountStore.AuthenticatePayload(mEmail, mPassword);
         mDispatcher.dispatch(AuthenticationActionBuilder.newAuthenticateAction(payload));
-        AppLog.i(T.NUX, "User tries to log in wpcom. Email: " + email);
+        AppLog.i(T.NUX, "User tries to log in wpcom. Email: " + mEmail);
 
         return START_REDELIVER_INTENT;
     }
 
-//    private void handleAuthError(AccountStore.AuthenticationErrorType error, String errorMessage) {
-//        if (error != AccountStore.AuthenticationErrorType.NEEDS_2FA) {
-//            AnalyticsTracker.track(AnalyticsTracker.Stat.LOGIN_FAILED, error.getClass().getSimpleName(),
-//                    error.toString(), errorMessage);
-//
-//            if (isSocialLogin) {
-//                AnalyticsTracker.track(AnalyticsTracker.Stat.LOGIN_SOCIAL_FAILURE, error.getClass().getSimpleName(),
-//                        error.toString(), errorMessage);
-//            }
-//        }
-//
-//        switch (error) {
-//            case INCORRECT_USERNAME_OR_PASSWORD:
-//            case NOT_AUTHENTICATED: // NOT_AUTHENTICATED is the generic error from XMLRPC response on first call.
-//                showPasswordError();
-//                break;
-//            case NEEDS_2FA:
-//                // login credentials were correct anyway so, offer to save to SmartLock
-//                saveCredentialsInSmartLock(mLoginListener.getSmartLockHelper(), mEmailAddress, mPassword);
-//
-//                if (isSocialLogin) {
-//                    mLoginListener.needs2faSocialConnect(mEmailAddress, mRequestedPassword, mIdToken, mService);
-//                } else {
-//                    mLoginListener.needs2fa(mEmailAddress, mRequestedPassword);
-//                }
-//
-//                break;
-//            case INVALID_REQUEST:
-//                // TODO: FluxC: could be specific?
-//            default:
-//                AppLog.e(T.NUX, "Server response: " + errorMessage);
-//
-//                ToastUtils.showToast(getActivity(),
-//                        errorMessage == null ? getString(R.string.error_generic) : errorMessage);
-//                break;
-//        }
-//    }
+    private void handleAuthError(AccountStore.AuthenticationErrorType error, String errorMessage) {
+        if (error != AccountStore.AuthenticationErrorType.NEEDS_2FA) {
+            AnalyticsTracker.track(AnalyticsTracker.Stat.LOGIN_FAILED, error.getClass().getSimpleName(),
+                    error.toString(), errorMessage);
+
+            if (isSocialLogin) {
+                AnalyticsTracker.track(AnalyticsTracker.Stat.LOGIN_SOCIAL_FAILURE, error.getClass().getSimpleName(),
+                        error.toString(), errorMessage);
+            }
+        }
+
+        switch (error) {
+            case INCORRECT_USERNAME_OR_PASSWORD:
+            case NOT_AUTHENTICATED: // NOT_AUTHENTICATED is the generic error from XMLRPC response on first call.
+                setState(LoginPhase.FAILURE);
+                break;
+            case NEEDS_2FA:
+                // login credentials were correct anyway so, offer to save to SmartLock
+                signalCredentialsOK();
+
+                if (isSocialLogin) {
+                    setState(LoginPhase.FAILURE_SOCIAL_2FA);
+                } else {
+                    setState(LoginPhase.FAILURE_2FA);
+                }
+
+                break;
+            case INVALID_REQUEST:
+                // TODO: FluxC: could be specific?
+            default:
+                setState(LoginPhase.FAILURE);
+                AppLog.e(T.NUX, "Server response: " + errorMessage);
+
+                ToastUtils.showToast(this, errorMessage == null ? getString(R.string.error_generic) : errorMessage);
+                break;
+        }
+    }
 
     protected void startPostLoginServices() {
         // Get reader tags so they're available as soon as the Reader is accessed - done for
@@ -307,8 +370,7 @@ public class LoginWpcomService extends AutoForeground<OnLoginStateUpdated> {
     public void onAuthenticationChanged(OnAuthenticationChanged event) {
         if (event.isError()) {
             AppLog.e(T.API, "onAuthenticationChanged has error: " + event.error.type + " - " + event.error.message);
-            setState(LoginPhase.FAILURE);
-//            handleAuthError(event.error.type, event.error.message);
+            handleAuthError(event.error.type, event.error.message);
             return;
         }
 

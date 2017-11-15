@@ -20,7 +20,6 @@ import org.wordpress.android.WordPress;
 import org.wordpress.android.analytics.AnalyticsTracker;
 import org.wordpress.android.ui.accounts.login.LoginWpcomService.OnCredentialsOK;
 import org.wordpress.android.ui.accounts.login.LoginWpcomService.OnLoginStateUpdated;
-import org.wordpress.android.util.AnalyticsUtils;
 import org.wordpress.android.util.AppLog;
 import org.wordpress.android.util.AppLog.T;
 import org.wordpress.android.util.AutoForeground;
@@ -353,6 +352,18 @@ public class LoginEmailPasswordFragment extends LoginBaseFormFragment<LoginListe
                 if (!isInProgress()) {
                     startProgress();
                 }
+                break;
+            case FAILURE_EMAIL_WRONG_PASSWORD:
+                endProgress();
+                showPasswordError();
+                break;
+            case FAILURE_2FA:
+                endProgress();
+                mLoginListener.needs2fa(mEmailAddress, mRequestedPassword);
+                break;
+            case FAILURE_SOCIAL_2FA:
+                endProgress();
+                mLoginListener.needs2faSocialConnect(mEmailAddress, mRequestedPassword, mIdToken, mService);
                 break;
             case FAILURE:
                 endProgress();
