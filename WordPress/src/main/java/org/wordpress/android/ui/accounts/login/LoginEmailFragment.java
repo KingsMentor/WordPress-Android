@@ -19,7 +19,6 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.google.android.gms.auth.api.Auth;
 import com.google.android.gms.auth.api.credentials.Credential;
@@ -59,6 +58,8 @@ public class LoginEmailFragment extends LoginBaseFormFragment<LoginListener>
         GoogleApiClient.ConnectionCallbacks,
         GoogleApiClient.OnConnectionFailedListener {
     private static final String KEY_GOOGLE_EMAIL = "KEY_GOOGLE_EMAIL";
+    private static final String KEY_HAS_DISMISSED_EMAIL_HINTS = "KEY_HAS_DISMISSED_EMAIL_HINTS";
+    private static final String KEY_IS_DISPLAYING_EMAIL_HINTS = "KEY_IS_DISPLAYING_EMAIL_HINTS";
     private static final String KEY_IS_SOCIAL = "KEY_IS_SOCIAL";
     private static final String KEY_OLD_SITES_IDS = "KEY_OLD_SITES_IDS";
     private static final String KEY_REQUESTED_EMAIL = "KEY_REQUESTED_EMAIL";
@@ -74,6 +75,9 @@ public class LoginEmailFragment extends LoginBaseFormFragment<LoginListener>
     private WPLoginInputRow mEmailInput;
     private boolean isSocialLogin;
 
+    protected boolean hasDismissedEmailHints;
+    protected boolean isDisplayingEmailHints;
+
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -82,15 +86,13 @@ public class LoginEmailFragment extends LoginBaseFormFragment<LoginListener>
             if (resultCode == RESULT_OK) {
                 Credential credential = data.getParcelableExtra(Credential.EXTRA_KEY);
                 mEmailInput.getEditText().setText(credential.getId());
-                Toast.makeText(getActivity(),
-                        "Email: " + credential.getId() +
-                        "\n\nName: " + credential.getName() +
-                        "\n\nPhoto: " + credential.getProfilePictureUri(),
-                        Toast.LENGTH_LONG).show();
+                next(getCleanedEmail());
             } else {
-                Log.e(LoginEmailFragment.class.getSimpleName(), "Hints: NOT OK");
-                Toast.makeText(getActivity(), "Hints Failed", Toast.LENGTH_SHORT).show();
+                hasDismissedEmailHints = true;
+                WPActivityUtils.showKeyboard(mEmailInput.getEditText());
             }
+
+            isDisplayingEmailHints = false;
         }
     }
 
@@ -134,7 +136,17 @@ public class LoginEmailFragment extends LoginBaseFormFragment<LoginListener>
         mEmailInput.getEditText().setOnFocusChangeListener(new View.OnFocusChangeListener() {
             @Override
             public void onFocusChange(View view, boolean hasFocus) {
-                if (hasFocus) {
+                if (hasFocus && !isDisplayingEmailHints && !hasDismissedEmailHints) {
+                    isDisplayingEmailHints = true;
+                    getCredentials();
+                }
+            }
+        });
+        mEmailInput.getEditText().setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if (!isDisplayingEmailHints && !hasDismissedEmailHints) {
+                    isDisplayingEmailHints = true;
                     getCredentials();
                 }
             }
@@ -246,6 +258,8 @@ public class LoginEmailFragment extends LoginBaseFormFragment<LoginListener>
             mRequestedEmail = savedInstanceState.getString(KEY_REQUESTED_EMAIL);
             mGoogleEmail = savedInstanceState.getString(KEY_GOOGLE_EMAIL);
             isSocialLogin = savedInstanceState.getBoolean(KEY_IS_SOCIAL);
+            isDisplayingEmailHints = savedInstanceState.getBoolean(KEY_IS_DISPLAYING_EMAIL_HINTS);
+            hasDismissedEmailHints = savedInstanceState.getBoolean(KEY_HAS_DISMISSED_EMAIL_HINTS);
         } else {
             AnalyticsTracker.track(AnalyticsTracker.Stat.LOGIN_EMAIL_FORM_VIEWED);
         }
@@ -258,6 +272,8 @@ public class LoginEmailFragment extends LoginBaseFormFragment<LoginListener>
         outState.putString(KEY_REQUESTED_EMAIL, mRequestedEmail);
         outState.putString(KEY_GOOGLE_EMAIL, mGoogleEmail);
         outState.putBoolean(KEY_IS_SOCIAL, isSocialLogin);
+        outState.putBoolean(KEY_IS_DISPLAYING_EMAIL_HINTS, isDisplayingEmailHints);
+        outState.putBoolean(KEY_HAS_DISMISSED_EMAIL_HINTS, hasDismissedEmailHints);
     }
 
     protected void next(String email) {
@@ -278,6 +294,13 @@ public class LoginEmailFragment extends LoginBaseFormFragment<LoginListener>
     public void onDetach() {
         super.onDetach();
         mLoginListener = null;
+
+        if (mGoogleApiClient.isConnected()) {
+            mGoogleApiClient.stopAutoManage(getActivity());
+            mGoogleApiClient.disconnect();
+        }
+
+        WPActivityUtils.showKeyboard(getActivity().getCurrentFocus());
     }
 
     private String getCleanedEmail() {
